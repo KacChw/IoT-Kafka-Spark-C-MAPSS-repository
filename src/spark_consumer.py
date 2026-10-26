@@ -1,7 +1,12 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, window, avg, stddev
 
-from config import KAFKA_BOOTSTRAP, KAFKA_TOPIC, OUTPUT_PATH
+from config import (
+    CHECKPOINT_PATH,
+    KAFKA_BOOTSTRAP,
+    KAFKA_TOPIC,
+    OUTPUT_PATH,
+)
 
 SCHEMA = """
     unit_number INT,
@@ -33,13 +38,19 @@ SCHEMA = """
     event_timestamp TIMESTAMP
 """
 
+
 def create_spark_session():
     return (
         SparkSession.builder
         .appName("CMAPSSMiniPipeline")
         .master("local[*]")
+        .config(
+            "spark.jars.packages",
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+        )
         .getOrCreate()
     )
+
 
 def main():
     spark = create_spark_session()
@@ -50,7 +61,7 @@ def main():
         .format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC)
-        .option("startingOffsets", "latest")
+        .option("startingOffsets", "earliest")
         .load()
     )
 
@@ -76,16 +87,21 @@ def main():
         )
     )
 
-    query = (
-        aggregated
-        .writeStream
-        .outputMode("update")
-        .format("console")
-        .option("truncate", "false")
-        .start()
-    )
+    try:
+        query = (
+            aggregated
+            .writeStream
+            .outputMode("append")
+            .format("parquet")
+            .option("path", OUTPUT_PATH)
+            .option("checkpointLocation", CHECKPOINT_PATH)
+            .start()
+        )
 
-    query.awaitTermination()
+        print(f"Zapisuję zamknięte okna do Parquet: {OUTPUT_PATH}")
+        query.awaitTermination()
+    finally:
+        spark.stop()
 
 
 if __name__ == "__main__":

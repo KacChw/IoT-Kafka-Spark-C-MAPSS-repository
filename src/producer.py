@@ -1,5 +1,7 @@
 import json
 import time
+from datetime import datetime, timezone
+
 import pandas as pd
 from kafka import KafkaProducer
 
@@ -11,8 +13,18 @@ COLUMNS = (
     + [f"sensor_{i}" for i in range(1, 22)]
 )
 
+
 def main():
+    if EVENTS_PER_SECOND <= 0:
+        raise ValueError("EVENTS_PER_SECOND musi być większe od zera.")
+
     df = pd.read_csv(DATA_PATH, sep=r"\s+", header=None, names=COLUMNS)
+    if df.empty:
+        raise ValueError(f"Plik danych jest pusty: {DATA_PATH}")
+    if df.isna().any().any():
+        raise ValueError(
+            f"Plik {DATA_PATH} zawiera brakujące wartości lub nie ma 26 kolumn."
+        )
 
     producer = KafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP,
@@ -20,30 +32,42 @@ def main():
         key_serializer=lambda key: key.encode("utf-8"),
     )
 
-    print(f"Wysyłam {len(df)} rekordów do tematu {KAFKA_TOPIC}")
+    print(
+        f"Wysyłam {len(df)} rekordów do tematu {KAFKA_TOPIC} "
+        f"przez {KAFKA_BOOTSTRAP}"
+    )
 
-    for _, row in df.iterrows():
-        event = row.to_dict()
-        event["event_timestamp"] = int(time.time() * 1000)
+    try:
+        for index, row in enumerate(df.itertuples(index=False, name=None), start=1):
+            event = {
+                name: (
+                    int(value)
+                    if name in ("unit_number", "time_in_cycles")
+                    else float(value)
+                )
+                for name, value in zip(COLUMNS, row)
+            }
+            event["event_timestamp"] = datetime.now(timezone.utc).isoformat(
+                timespec="milliseconds"
+            )
 
-        key = str(int(event["unit_number"]))
+            key = str(event["unit_number"])
 
-        producer.send(
-            topic=KAFKA_TOPIC,
-            key=key,
-            value=event,
-        )
+            producer.send(
+                topic=KAFKA_TOPIC,
+                key=key,
+                value=event,
+            ).get(timeout=30)
 
-        print(
-            f"engine={event['unit_number']} "
-            f"cycle={event['time_in_cycles']} "
-            f"sensor_2={event['sensor_2']}"
-        )
+            if index % 100 == 0 or index == len(df):
+                print(f"Wysłano {index}/{len(df)} rekordów")
 
-        time.sleep(1 / EVENTS_PER_SECOND)
+            time.sleep(1 / EVENTS_PER_SECOND)
 
-    producer.flush()
-    producer.close()
+        producer.flush()
+    finally:
+        producer.close()
+
     print("Producer zakończony.")
 
 
