@@ -1,0 +1,27 @@
+# Python virtual environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local editor settings and generated output
+.vscode/
+output/
+spark-warehouse/
+metastore_db/
+
+# Reference PDF
+data/Damage Propagation Modeling.pdf
+
+# Only FD001 is needed by the current default producer configuration
+data/*.txt
+!data/train_FD001.txt
+!data/test_FD001.txt
+!data/RUL_FD001.txt
